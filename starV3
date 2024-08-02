@@ -1,0 +1,283 @@
+import os
+from openai import OpenAI
+import json
+import sys
+from io import StringIO
+import tiktoken
+
+# 初始化 OpenAI 客户端
+client = OpenAI(api_key="your api key here")
+INPUT_TOKEN_PRICE = 0.15
+OUTPUT_TOKEN_PRICE = 0.60
+
+def count_tokens(text):
+    """计算给定文本的token数量"""
+    encoding = tiktoken.encoding_for_model("gpt-4")
+    return len(encoding.encode(text))
+
+def calculate_cost(input_tokens, output_tokens):
+    """计算给定token数量的成本"""
+    input_cost = (input_tokens / 1_000_000) * INPUT_TOKEN_PRICE
+    output_cost = (output_tokens / 1_000_000) * OUTPUT_TOKEN_PRICE
+    total_cost = input_cost + output_cost
+    return input_cost, output_cost, total_cost
+
+hints = {
+    "user_input": "Utilize common Python libraries or Python cloud APIs that are free and don't require a key. Remember to print all the information you need in your Python code.",
+    "python_result": "Is this the result from python，treat math result as truth and careful for search result",
+    "ai_thinking": ""
+}
+import sys
+from io import StringIO
+
+def execute_python(code):
+    """执行Python代码并返回结果"""
+    try:
+        # 捕获标准输出
+        original_stdout = sys.stdout
+        sys.stdout = StringIO()
+        
+        # 执行代码并获取最后一个表达式的值
+        locals_dict = {}
+        exec(code, globals(), locals_dict)
+        last_value = None
+        if len(locals_dict) > 0:
+            last_value = locals_dict[list(locals_dict.keys())[-1]]
+        
+        # 获取打印的输出
+        output = sys.stdout.getvalue()
+        sys.stdout = original_stdout
+        
+        # 如果有打印输出，返回输出，否则返回最后一个表达式的值
+        if output.strip():
+            return output.strip()
+        elif last_value is not None:
+            return str(last_value)
+        else:
+            return ""
+    except Exception as e:
+        return str(e)
+
+
+def print_message(role="", message="", hint=""):
+    data = {}
+    
+    if role:
+        data["role"] = role
+        
+    if message:
+        data["content"] = message
+    
+    if hint:
+        data["hint"] = hint
+    
+    json_output = json.dumps(data, ensure_ascii=False, indent=2)
+    print(json_output)
+
+def format_message(role, message, hint="", p=""):
+    """格式化消息为新的JSON格式"""
+    inner_content = {
+        "role": role,
+        "message": message,
+        "hint": hint
+    }
+    
+    # Remove empty fields
+    inner_content = {k: v for k, v in inner_content.items() if v}
+    
+    outer_content = {
+        "role": "user",
+        "content": json.dumps(inner_content, ensure_ascii=False)
+    }
+    
+    if p == 1:
+        return json.dumps(outer_content, ensure_ascii=False, indent=2)
+    return json.dumps(outer_content, ensure_ascii=False)
+
+def chat_with_gpt4o_mini(mode):
+    conversation = []
+    default_prompt = """
+    
+    You are an AI assistant named Star, acting as Steven's personal AI helper. In each interaction, you will receive input in JSON format. Your task is to process this input and respond appropriately based on the given information.
+
+The input you receive will be in the following format:
+<json_input>
+{
+{
+role：python、user、self
+message:
+hint:
+}
+
+2. Output Format:
+Your response should always be in JSON format with the following structure:
+{
+  "status": "python" or "reply",
+  "message": "Your message or Python code here"
+}
+
+3. Guidelines for different roles and statuses:
+
+a) When the role is "python":
+   - Set your status to "python"
+   - Include only Python code in the message field
+   - Do not add any explanations or comments outside the code
+
+b) When you receive a Python result:
+   - The system will provide you with the executed Python result
+   - Use this information to formulate your next response
+
+c) For other roles (user, self):
+   - Set your status to "reply"
+   - Provide an appropriate response in the message field
+
+4. Language Preference:
+Remember that Steven's language preference is Chinese. Always respond in Chinese unless specifically instructed otherwise.
+
+5. Beginning Your Role:
+To begin your role as Steven's AI assistant, respond with:
+{
+  "status": "reply",
+  "message": "我已准备好为您服务"
+}
+
+6. Maintaining Format and Adaptability:
+Always maintain the JSON format in your responses, and adapt your language and approach based on the input you receive.
+
+7. Using Python for Tasks:
+Always use Python to perform tasks. Utilize common Python libraries or Python cloud APIs that are free and don't require a key.
+Remember to print all the information you need in your Python code to answer the user.
+eg: user compare 3.33 and 2*1.11
+{
+  "status": "python",
+  "message": "print(f"the "max(3.33,2*1.11)"is larger)"
+}
+
+api key are envirment
+OpenWeather_API_KEY 、
+Google_Search_API_KEY 、 SCE_ID
+
+And apikey for is newsapi.org='35bdcc716fd043a2b342ebcb9e8e0321'
+Remember to get these keys by os.getenv
+Remember to process the input carefully, follow these instructions, and provide appropriate responses based on the role and content of each input.
+    """
+    total_input_tokens = 0
+    total_output_tokens = 0
+    COST_DISPLAY_THRESHOLD = 0.01
+    # 添加默认提示词
+    conversation.append({"role": "user", "content": default_prompt})
+    total_input_tokens += count_tokens(default_prompt)
+    print("Star启动中请稍后，输入'退出'结束对话。")
+    
+    while True:
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",  # 使用实际可用的模型，如 gpt-4 或 gpt-3.5-turbo
+                messages=[{"role": m["role"], "content": m["content"]} for m in conversation]
+            )
+            ai_response_raw = response.choices[0].message.content
+            total_input_tokens += count_tokens(default_prompt)
+            
+            if mode == "1":  # 对话模式
+                ai_response = json.loads(ai_response_raw)
+                status = ai_response.get("status")
+                message = ai_response.get("message")
+                
+                if status == "reply":
+                    print("AI:", message)
+                    user_input = input("您: ")
+                    if user_input.lower() == '退出':
+                        print("对话结束。")
+                        break
+                    conversation.append({"role": "user", "content": format_message("user", user_input, hints["user_input"])})
+                elif status == "python":
+                    result = execute_python(message)
+                    conversation.append({"role": "user", "content": format_message("system", result, hints["python_result"])})
+                elif status == "thinking":
+                    conversation.append({"role": "user", "content": format_message("self", message, hints["ai_thinking"])})
+                else:
+                    print(f"未知状态: {status}")
+                    break
+                input_cost, output_cost, total_cost = calculate_cost(total_input_tokens, total_output_tokens)
+                # 仅当总成本超过阈值时才显示成本信息
+                if total_cost >= COST_DISPLAY_THRESHOLD:
+                    print(f"\n当前token使用情况和成本：")
+                    print(f"输入token总数：{total_input_tokens} (成本: ${input_cost:.4f})")
+                    print(f"输出token总数：{total_output_tokens} (成本: ${output_cost:.4f})")
+                    print(f"总token数：{total_input_tokens + total_output_tokens}")
+                    print(f"总成本：${total_cost:.4f}\n")
+                
+            elif mode == "2":  # 对话模式（python）
+                ai_response = json.loads(ai_response_raw)
+                status = ai_response.get("status")
+                message = ai_response.get("message")
+                
+                if status == "reply":
+                    print("Star:", message)
+                    user_input = input("您: ")
+                    if user_input.lower() == '退出':
+                        print("对话结束。")
+                        break
+                    conversation.append({"role": "user", "content": format_message("user", user_input, hints["user_input"])})
+                elif status == "python":
+                    print(f"python in progressing：{message}")
+                    result = execute_python(message)
+                    print(f"python: {result}")
+                    conversation.append({"role": "user", "content": format_message("python", result, hints["python_result"])})
+                elif status == "thinking":
+                    conversation.append({"role": "user", "content": format_message("self", message, hints["ai_thinking"])})
+                else:
+                    print(f"未知状态: {status}")
+                    break
+                input_cost, output_cost, total_cost = calculate_cost(total_input_tokens, total_output_tokens)
+                # 仅当总成本超过阈值时才显示成本信息
+                if total_cost >= COST_DISPLAY_THRESHOLD:
+                    print(f"\n当前token使用情况和成本：")
+                    print(f"输入token总数：{total_input_tokens} (成本: ${input_cost:.4f})")
+                    print(f"输出token总数：{total_output_tokens} (成本: ${output_cost:.4f})")
+                    print(f"总token数：{total_input_tokens + total_output_tokens}")
+                    print(f"总成本：${total_cost:.4f}\n")
+                
+            elif mode == "743":  # 开发者模式
+                ai_response = json.loads(ai_response_raw)
+                status = ai_response.get("status")
+                message = ai_response.get("message")
+                print(f"Star:\n status: {status} \n message: {message}\n")
+                if status == "reply":
+                    user_input = input("您: ")
+                    if user_input.lower() == '退出':
+                        print("对话结束。")
+                        break
+                    formatted_input = format_message("user", user_input, hints["user_input"])
+                    total_input_tokens += count_tokens(formatted_input)     
+                    conversation.append({"role": "user", "content": format_message("user", user_input, hints["user_input"])})
+                    print(f"role：user\n messgae:{user_input}\nhint：")
+                    print(hints["user_input"])
+                elif status == "python":
+                    print("python in progressing")
+                    result = execute_python(message)
+                    print("done")
+                    formatted_result = format_message("system", result, hints["python_result"])
+                    total_input_tokens += count_tokens(formatted_result)
+                    conversation.append({"role": "user", "content": format_message("python", result, hints["python_result"])})
+                    print(f"role：python\n messgae:{result},\n ")
+                    print(hints["python_result"])
+                elif status == "thinking":
+                    formatted_thinking = format_message("system", message, hints["ai_thinking"])
+                    total_input_tokens += count_tokens(formatted_thinking)
+                    conversation.append({"role": "user", "content": format_message("self", message, hints["ai_thinking"])})
+                    print(f"role：self\n messgae:{message},\n ")
+                else:
+                    print(f"未知状态: {status}")
+                    break
+            input_cost, output_cost, total_cost = calculate_cost(total_input_tokens, total_output_tokens)
+            print(f"总成本：${total_cost:.4f}\n")
+            
+        
+        except Exception as e:
+            print(f"发生错误: {str(e)}")
+            break
+
+if __name__ == "__main__":
+    mode = input("请选择模式：1. 对话模式 2. 对话模式（显示python）\n")
+    chat_with_gpt4o_mini(mode)
